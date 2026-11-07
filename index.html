@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex">
+  <title>Trip Tab</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main id="gate" class="gate" hidden>
+    <h1>Trip Tab</h1>
+    <p>Enter the group passcode to see receipts and who owes what.</p>
+    <form id="gate-form" class="stack">
+      <label for="gate-code">Group passcode</label>
+      <input id="gate-code" autocomplete="off" autocapitalize="none" spellcheck="false" required>
+      <button class="primary" type="submit">Open</button>
+      <p id="gate-error" class="error" role="alert" hidden></p>
+    </form>
+  </main>
+
+  <div id="app" hidden>
+    <header class="top">
+      <div class="top-row">
+        <h1>Trip Tab</h1>
+        <label class="who">
+          <span>I am</span>
+          <select id="me"></select>
+        </label>
+      </div>
+      <dl class="stats">
+        <div><dt>Spent so far</dt><dd id="stat-total">$0.00</dd></div>
+        <div><dt>Each person's share</dt><dd id="stat-share">$0.00</dd></div>
+        <div><dt>Your balance</dt><dd id="stat-me">Pick your name</dd></div>
+      </dl>
+    </header>
+
+    <nav class="tabs" aria-label="Sections">
+      <button type="button" data-tab="settle">Settle up</button>
+      <button type="button" data-tab="add">Add receipt</button>
+      <button type="button" data-tab="receipts">Receipts</button>
+      <button type="button" data-tab="people">Everyone</button>
+    </nav>
+
+    <main class="content">
+      <p id="status" class="notice" role="status" hidden></p>
+
+      <section id="tab-settle" class="tab stack">
+        <div id="my-transfers" class="stack"></div>
+        <form id="handles-form" class="panel stack">
+          <h2>Your payment info</h2>
+          <p class="hint">People who owe you will see this. Only add what you're okay sharing with the group.</p>
+          <div class="field-row">
+            <div class="stack tight">
+              <label for="venmo">Venmo username</label>
+              <input id="venmo" placeholder="@your-name" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="31">
+            </div>
+            <div class="stack tight">
+              <label for="zelle">Zelle phone or email</label>
+              <input id="zelle" placeholder="213-555-0100" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="100">
+            </div>
+          </div>
+          <button class="primary" type="submit">Save payment info</button>
+        </form>
+        <h2>All payments still needed</h2>
+        <p id="paid-count" class="hint"></p>
+        <div id="all-transfers" class="list"></div>
+        <h2>Paid</h2>
+        <p class="hint">Uncheck a payment if it was checked by mistake.</p>
+        <div id="payments" class="list"></div>
+      </section>
+
+      <section id="tab-add" class="tab" hidden>
+        <form id="receipt-form" class="panel stack">
+          <h2>Add a receipt</h2>
+          <div class="stack tight">
+            <label for="receipt-person">Who paid</label>
+            <select id="receipt-person" required></select>
+          </div>
+          <div class="stack tight">
+            <label for="receipt-store">Store</label>
+            <input id="receipt-store" maxlength="80" placeholder="Costco" required>
+          </div>
+          <div class="stack tight">
+            <label for="receipt-amount">Total paid, with tax</label>
+            <input id="receipt-amount" inputmode="decimal" placeholder="141.50" required>
+          </div>
+          <div class="stack tight">
+            <label for="receipt-note">What it was for (optional)</label>
+            <input id="receipt-note" maxlength="200" placeholder="Ground beef and buns">
+          </div>
+          <div class="stack tight">
+            <label for="receipt-photo">Receipt photo</label>
+            <input id="receipt-photo" type="file" accept="image/*" required>
+            <p class="hint">Cover any full card numbers first. Everyone with the passcode can see this photo.</p>
+          </div>
+          <p id="receipt-read" class="hint" role="status" hidden></p>
+          <img id="receipt-preview" class="preview" alt="Preview of your receipt" hidden>
+          <button id="receipt-save" class="primary" type="submit">Save receipt</button>
+        </form>
+      </section>
+
+      <section id="tab-receipts" class="tab stack" hidden>
+        <h2>Receipts</h2>
+        <div id="receipts" class="list"></div>
+      </section>
+
+      <section id="tab-people" class="tab stack" hidden>
+        <h2>Everyone</h2>
+        <p class="hint">A positive balance means that person gets money back. Check payment info with the person before sending a large amount.</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Name</th><th>Status</th><th class="num">Spent</th><th class="num">Balance</th><th>Receipts</th><th>Venmo</th><th>Zelle</th></tr></thead>
+            <tbody id="people"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="config.js"></script>
+  <script src="split.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
