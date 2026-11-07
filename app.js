@@ -19,6 +19,7 @@ let confirmingId = null;
 let openPhotos = new Map();
 let readAttempt = 0;
 let pollTimer = null;
+let receiptPromptOpen = false;
 
 const $ = (id) => document.getElementById(id);
 
@@ -186,6 +187,51 @@ function transferRow(transfer) {
     actions.childElementCount ? actions : null);
 }
 
+// Opens the receipt form with what we already know about the item filled in.
+function promptForReceipt(item) {
+  if (!$('receipt-store').value.trim()) $('receipt-store').value = item.store.slice(0, 80);
+  const label = `${item.item} (${item.quantity})`;
+  const note = $('receipt-note').value.trim();
+  $('receipt-note').value = (note ? `${note}, ${label}` : label).slice(0, 200);
+  if (adminCode && item.personId) $('receipt-person').value = item.personId;
+  $('receipt-prompt-text').textContent = `You checked off ${item.item}. Add its receipt so it counts toward the split.`;
+  $('receipt-prompt').hidden = false;
+  receiptPromptOpen = true;
+  showStatus('');
+  showTab('add');
+  window.scrollTo({ top: 0 });
+}
+
+function closeReceiptPrompt() {
+  receiptPromptOpen = false;
+  $('receipt-prompt').hidden = true;
+}
+
+async function setBought(item, box) {
+  const bought = box.checked;
+  box.disabled = true;
+  try {
+    await rpc('trip_set_bought', { p_token: token, p_id: item.id, p_bought: bought, p_admin: adminCode });
+    assignments = assignments.map((a) => (a.id === item.id ? { ...a, bought } : a));
+    renderBuy();
+    if (bought) promptForReceipt(item);
+  } catch (error) {
+    box.disabled = false;
+    box.checked = !bought;
+    reportError(error);
+  }
+}
+
+function boughtControl(item) {
+  if (item.bought === undefined) return null;
+  if (!canManage(item.personId)) {
+    return item.bought ? el('span', { class: 'bought-label', textContent: 'Bought' }) : null;
+  }
+  const box = el('input', { type: 'checkbox', checked: item.bought });
+  box.addEventListener('change', () => setBought(item, box));
+  return el('label', { class: 'check' }, box, 'Bought');
+}
+
 function buyRow(item) {
   const safeUrl = item.url.startsWith('https://') ? item.url : '';
   const backupUrl = (item.backupUrl || '').startsWith('https://') ? item.backupUrl : '';
@@ -195,7 +241,8 @@ function buyRow(item) {
       el('span', { class: 'amount', textContent: `about ${formatCents(item.estimateCents)}` })),
     el('span', { class: 'hint', textContent: `${item.when} · ${item.store}` }),
     safeUrl ? el('a', { href: safeUrl, target: '_blank', rel: 'noopener noreferrer', textContent: `Open ${item.store}` }) : null,
-    backupUrl ? el('a', { class: 'backup-link', href: backupUrl, target: '_blank', rel: 'noopener noreferrer', textContent: `Backup option: ${item.backupStore}` }) : null);
+    backupUrl ? el('a', { class: 'backup-link', href: backupUrl, target: '_blank', rel: 'noopener noreferrer', textContent: `Backup option: ${item.backupStore}` }) : null,
+    boughtControl(item));
 }
 
 const estimateOf = (items) => items.reduce((sum, a) => sum + a.estimateCents, 0);
@@ -209,12 +256,14 @@ function renderBuy() {
     everyone.replaceChildren();
     return;
   }
+  const openLists = new Set([...everyone.querySelectorAll('details[open]')].map((d) => d.dataset.name));
   const mine = assignments.filter((a) => a.personId === state.me);
+  const boughtCount = mine.filter((a) => a.bought).length;
   const myList = el('div', { class: 'list mine' });
   if (mine.length) mine.forEach((a) => myList.append(buyRow(a)));
   else myList.append(el('p', { class: 'empty', textContent: "You don't have anything to buy." }));
   mineBox.replaceChildren(
-    el('h2', { textContent: `Your list: about ${formatCents(estimateOf(mine))}` }),
+    el('h2', { textContent: `Your list: about ${formatCents(estimateOf(mine))}${mine.length && mine[0].bought !== undefined ? `, ${boughtCount} of ${mine.length} bought` : ''}` }),
     el('p', { class: 'hint', textContent: "Use the first link if you can. If that store doesn't work out, use the backup option. Prices are estimates and may differ, and your real receipt is what counts toward the split." }),
     myList);
 
@@ -222,11 +271,15 @@ function renderBuy() {
   const known = new Set(state.people.map((p) => p.id));
   const unassigned = assignments.filter((a) => !known.has(a.personId));
   if (unassigned.length) groups.push({ name: 'Unassigned', items: unassigned });
-  everyone.replaceChildren(...groups.filter((g) => g.items.length).map((g) => el('details', { class: 'person-list' },
-    el('summary', {},
-      el('span', { class: 'row-title', textContent: g.name }),
-      el('span', { class: 'amount', textContent: `about ${formatCents(estimateOf(g.items))}` })),
-    ...g.items.map(buyRow))));
+  everyone.replaceChildren(...groups.filter((g) => g.items.length).map((g) => {
+    const details = el('details', { class: 'person-list', open: openLists.has(g.name) },
+      el('summary', {},
+        el('span', { class: 'row-title', textContent: g.name }),
+        el('span', { class: 'amount', textContent: `about ${formatCents(estimateOf(g.items))}` })),
+      ...g.items.map((a) => buyRow(a)));
+    details.dataset.name = g.name;
+    return details;
+  }));
 }
 
 async function loadAssignments() {
@@ -531,6 +584,9 @@ function leaveApp() {
   adminCode = null;
   state = { me: null, people: [], receipts: [], payments: [] };
   assignments = null;
+  closeReceiptPrompt();
+  $('receipt-form').reset();
+  $('receipt-preview').hidden = true;
   announcements = [];
   $('announcements').replaceChildren();
   $('announcements').hidden = true;
@@ -654,6 +710,16 @@ $('handles-form').addEventListener('submit', async (event) => {
   }
 });
 
+$('receipt-prompt-skip').addEventListener('click', () => {
+  closeReceiptPrompt();
+  $('receipt-form').reset();
+  $('receipt-preview').hidden = true;
+  $('receipt-read').hidden = true;
+  readAttempt++;
+  showTab('buy');
+  showStatus("Okay. Your item stays checked off. Add the receipt from the Add receipt tab when you have it, or it won't count toward the split.");
+});
+
 $('receipt-photo').addEventListener('change', async () => {
   const file = $('receipt-photo').files[0];
   const attempt = ++readAttempt;
@@ -733,7 +799,10 @@ $('receipt-form').addEventListener('submit', async (event) => {
     $('receipt-preview').removeAttribute('src');
     $('receipt-read').hidden = true;
     readAttempt++;
+    const fromPrompt = receiptPromptOpen;
+    closeReceiptPrompt();
     await refresh();
+    if (fromPrompt) showTab('buy');
     showStatus(`Saved ${formatCents(cents)}. Balances are updated.`);
   } catch (error) {
     reportError(error);
@@ -765,6 +834,7 @@ adminForm('admin-unlock', async () => {
   if (!await rpc('trip_admin_check', { p_token: token, p_admin: entered })) throw new Error('wrong_admin');
   adminCode = entered;
   store(ADMIN_KEY, entered);
+  renderBuy();
   return 'Admin mode is on for this device.';
 });
 
@@ -773,6 +843,7 @@ $('admin-leave').addEventListener('click', () => {
   store(ADMIN_KEY, null);
   showStatus('Admin mode is off for this device.');
   render();
+  renderBuy();
 });
 
 $('admin-handles-person').addEventListener('change', () => {

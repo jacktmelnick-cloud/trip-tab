@@ -6,7 +6,7 @@
   <meta name="robots" content="noindex">
   <title>Trip Tab</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="style.css?v=6">
+  <link rel="stylesheet" href="style.css?v=7">
 </head>
 <body>
   <main id="gate" class="gate" hidden>
@@ -101,6 +101,10 @@
       <section id="tab-add" class="tab" hidden>
         <form id="receipt-form" class="panel stack">
           <h2>Add a receipt</h2>
+          <div id="receipt-prompt" class="notice stack" role="status" hidden>
+            <p id="receipt-prompt-text"></p>
+            <button id="receipt-prompt-skip" type="button">Skip for now</button>
+          </div>
           <div id="receipt-person-field" class="stack tight" hidden>
             <label for="receipt-person">Who paid (admin)</label>
             <select id="receipt-person"></select>
@@ -235,8 +239,8 @@
   </div>
 
   <!-- Bump ?v= on every release so browsers never mix a new page with old cached code. -->
-  <script src="config.js?v=6"></script>
-  <script src="split.js?v=6"></script>
-  <script src="app.js?v=6"></script>
+  <script src="config.js?v=7"></script>
+  <script src="split.js?v=7"></script>
+  <script src="app.js?v=7"></script>
 </body>
 </html>
