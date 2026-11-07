@@ -6,7 +6,7 @@
   <meta name="robots" content="noindex">
   <title>Trip Tab</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=2">
 </head>
 <body>
   <main id="gate" class="gate" hidden>
@@ -216,8 +216,9 @@
     </main>
   </div>
 
-  <script src="config.js"></script>
-  <script src="split.js"></script>
-  <script src="app.js"></script>
+  <!-- Bump ?v= on every release so browsers never mix a new page with old cached code. -->
+  <script src="config.js?v=2"></script>
+  <script src="split.js?v=2"></script>
+  <script src="app.js?v=2"></script>
 </body>
 </html>
