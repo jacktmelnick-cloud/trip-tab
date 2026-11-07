@@ -13,6 +13,7 @@ let names = [];
 let state = { me: null, people: [], receipts: [], payments: [] };
 let balances = {};
 let assignments = null;
+let announcements = [];
 let currentTab = 'buy';
 let confirmingId = null;
 let openPhotos = new Map();
@@ -78,6 +79,8 @@ function explain(error) {
     bad_name: 'Enter a name of 60 characters or fewer.',
     short_passcode: 'Use at least 8 characters for the new passcode.',
     wrong_admin: "That admin passcode isn't right.",
+    bad_announcement: 'Write an announcement of 500 characters or fewer.',
+    too_many_announcements: 'The limit of 50 announcements is full. Delete an old one first.',
   };
   return messages[error.message] || "That didn't save. Check your connection and try again.";
 }
@@ -295,6 +298,20 @@ function confirmDelete(id, label, question, action) {
   return box;
 }
 
+function renderAnnouncements() {
+  const box = $('announcements');
+  box.hidden = !announcements.length;
+  box.replaceChildren(...announcements.map((note) => {
+    const posted = new Date(note.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    return el('div', { class: 'announcement' },
+      el('p', { class: 'hint', textContent: `Announcement · ${posted}` }),
+      el('p', { class: 'announcement-body', textContent: note.body }),
+      adminCode
+        ? confirmDelete(note.id, 'Delete', 'Delete this announcement?', () => rpc('trip_admin_delete_announcement', { p_token: token, p_admin: adminCode, p_id: note.id }))
+        : null);
+  }));
+}
+
 function renderReceipts() {
   const list = $('receipts');
   list.replaceChildren();
@@ -387,6 +404,7 @@ function render() {
   $('stat-share').textContent = formatCents(computed.shares[state.me] || 0);
   $('stat-me').textContent = balanceLabel(balances[state.me] || 0);
 
+  renderAnnouncements();
   renderSettle(transfers);
   renderReceipts();
   renderPeople();
@@ -403,6 +421,8 @@ function showTab(name) {
 
 async function refresh() {
   state = await rpc('trip_get_state', { p_token: token });
+  // A problem loading announcements shouldn't stop the rest of the page.
+  announcements = await rpc('trip_get_announcements', { p_token: token }).catch(() => announcements);
   render();
 }
 
@@ -511,6 +531,9 @@ function leaveApp() {
   adminCode = null;
   state = { me: null, people: [], receipts: [], payments: [] };
   assignments = null;
+  announcements = [];
+  $('announcements').replaceChildren();
+  $('announcements').hidden = true;
   currentTab = 'buy';
   $('my-list').replaceChildren();
   $('everyone-lists').replaceChildren();
@@ -756,6 +779,11 @@ $('admin-handles-person').addEventListener('change', () => {
   const person = personOf($('admin-handles-person').value);
   $('admin-venmo').value = person && person.venmo ? `@${person.venmo}` : '';
   $('admin-zelle').value = person ? person.zelle : '';
+});
+
+adminForm('admin-announce', async () => {
+  await rpc('trip_admin_post_announcement', { p_token: token, p_admin: adminCode, p_body: $('admin-announcement').value });
+  return 'Announcement posted. Everyone will see it at the top of the page.';
 });
 
 adminForm('admin-handles', async () => {
