@@ -164,6 +164,7 @@ input:disabled { opacity: 0.6; }
 .person-list:first-child { border-top: 0; }
 .person-list summary { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; padding: 12px 14px; cursor: pointer; }
 .row a { color: var(--accent); font-weight: 600; justify-self: start; }
+.row a.backup-link { color: var(--muted); font-weight: 500; font-size: 0.92rem; margin-top: -4px; }
 
 .table-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
 table { border-collapse: collapse; width: 100%; min-width: 760px; font-size: 0.92rem; }

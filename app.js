@@ -185,12 +185,14 @@ function transferRow(transfer) {
 
 function buyRow(item) {
   const safeUrl = item.url.startsWith('https://') ? item.url : '';
+  const backupUrl = (item.backupUrl || '').startsWith('https://') ? item.backupUrl : '';
   return el('div', { class: 'row' },
     el('div', { class: 'row-head' },
       el('span', { class: 'row-title', textContent: `${item.item} (${item.quantity})` }),
       el('span', { class: 'amount', textContent: `about ${formatCents(item.estimateCents)}` })),
     el('span', { class: 'hint', textContent: `${item.when} · ${item.store}` }),
-    safeUrl ? el('a', { href: safeUrl, target: '_blank', rel: 'noopener noreferrer', textContent: `Open ${item.store}` }) : null);
+    safeUrl ? el('a', { href: safeUrl, target: '_blank', rel: 'noopener noreferrer', textContent: `Open ${item.store}` }) : null,
+    backupUrl ? el('a', { class: 'backup-link', href: backupUrl, target: '_blank', rel: 'noopener noreferrer', textContent: `Backup option: ${item.backupStore}` }) : null);
 }
 
 const estimateOf = (items) => items.reduce((sum, a) => sum + a.estimateCents, 0);
@@ -210,7 +212,7 @@ function renderBuy() {
   else myList.append(el('p', { class: 'empty', textContent: "You don't have anything to buy." }));
   mineBox.replaceChildren(
     el('h2', { textContent: `Your list: about ${formatCents(estimateOf(mine))}` }),
-    el('p', { class: 'hint', textContent: 'Prices are estimates. Your real receipt is what counts toward the split.' }),
+    el('p', { class: 'hint', textContent: "Use the first link if you can. If that store doesn't work out, use the backup option. Prices are estimates and may differ, and your real receipt is what counts toward the split." }),
     myList);
 
   const groups = state.people.map((p) => ({ name: p.name, items: assignments.filter((a) => a.personId === p.id) }));
