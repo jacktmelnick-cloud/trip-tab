@@ -11,12 +11,30 @@
 <body>
   <main id="gate" class="gate" hidden>
     <h1>Trip Tab</h1>
-    <p>Enter the group passcode to see receipts and who owes what.</p>
-    <form id="gate-form" class="stack">
+    <p id="gate-error" class="error" role="alert" hidden></p>
+    <form id="gate-form" class="stack" hidden>
+      <p>Enter the group passcode to find your name.</p>
       <label for="gate-code">Group passcode</label>
       <input id="gate-code" autocomplete="off" autocapitalize="none" spellcheck="false" required>
-      <button class="primary" type="submit">Open</button>
-      <p id="gate-error" class="error" role="alert" hidden></p>
+      <button class="primary" type="submit">Continue</button>
+    </form>
+    <form id="login-form" class="stack" hidden>
+      <div class="stack tight">
+        <label for="login-name">Your name</label>
+        <select id="login-name" required></select>
+      </div>
+      <div id="login-password-field" class="stack tight" hidden>
+        <label id="login-password-label" for="login-password">Password</label>
+        <input id="login-password" type="password" maxlength="72">
+      </div>
+      <div id="login-confirm-field" class="stack tight" hidden>
+        <label for="login-confirm">Type it again</label>
+        <input id="login-confirm" type="password" autocomplete="new-password" maxlength="72">
+      </div>
+      <p id="login-error" class="error" role="alert" hidden></p>
+      <button id="login-submit" class="primary" type="submit" hidden>Sign in</button>
+      <p id="login-reset-hint" class="hint" hidden>Forgot your password? Ask the trip admin to reset it.</p>
+      <button id="login-back" type="button">Enter a different group passcode</button>
     </form>
   </main>
 
@@ -24,15 +42,15 @@
     <header class="top">
       <div class="top-row">
         <h1>Trip Tab</h1>
-        <label class="who">
-          <span>I am</span>
-          <select id="me"></select>
-        </label>
+        <div class="who">
+          <span id="signed-in-as"></span>
+          <button id="sign-out" type="button">Sign out</button>
+        </div>
       </div>
       <dl class="stats">
         <div><dt>Spent so far</dt><dd id="stat-total">$0.00</dd></div>
         <div><dt>Each person's share</dt><dd id="stat-share">$0.00</dd></div>
-        <div><dt>Your balance</dt><dd id="stat-me">Pick your name</dd></div>
+        <div><dt>Your balance</dt><dd id="stat-me">All square</dd></div>
       </dl>
     </header>
 
@@ -41,6 +59,7 @@
       <button type="button" data-tab="add">Add receipt</button>
       <button type="button" data-tab="receipts">Receipts</button>
       <button type="button" data-tab="people">Everyone</button>
+      <button type="button" data-tab="admin">Admin</button>
     </nav>
 
     <main class="content">
@@ -61,22 +80,22 @@
               <input id="zelle" placeholder="213-555-0100" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="100">
             </div>
           </div>
-          <button class="primary" type="submit">Save payment info</button>
+          <button id="handles-save" class="primary" type="submit">Save payment info</button>
         </form>
         <h2>All payments still needed</h2>
         <p id="paid-count" class="hint"></p>
         <div id="all-transfers" class="list"></div>
         <h2>Paid</h2>
-        <p class="hint">Uncheck a payment if it was checked by mistake.</p>
+        <p class="hint">The payer or receiver can uncheck a payment if it was checked by mistake.</p>
         <div id="payments" class="list"></div>
       </section>
 
       <section id="tab-add" class="tab" hidden>
         <form id="receipt-form" class="panel stack">
           <h2>Add a receipt</h2>
-          <div class="stack tight">
-            <label for="receipt-person">Who paid</label>
-            <select id="receipt-person" required></select>
+          <div id="receipt-person-field" class="stack tight" hidden>
+            <label for="receipt-person">Who paid (admin)</label>
+            <select id="receipt-person"></select>
           </div>
           <div class="stack tight">
             <label for="receipt-store">Store</label>
@@ -111,9 +130,87 @@
         <p class="hint">A positive balance means that person gets money back. Check payment info with the person before sending a large amount.</p>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Name</th><th>Status</th><th class="num">Spent</th><th class="num">Balance</th><th>Receipts</th><th>Venmo</th><th>Zelle</th></tr></thead>
+            <thead><tr><th>Name</th><th>Status</th><th class="num">Spent</th><th class="num">Balance</th><th>Receipts</th><th>Login</th><th>Venmo</th><th>Zelle</th></tr></thead>
             <tbody id="people"></tbody>
           </table>
+        </div>
+      </section>
+
+      <section id="tab-admin" class="tab stack" hidden>
+        <form id="admin-unlock" class="panel stack">
+          <h2>Admin</h2>
+          <p class="hint">For the trip admin only. This needs a separate admin passcode.</p>
+          <div class="stack tight">
+            <label for="admin-code">Admin passcode</label>
+            <input id="admin-code" autocomplete="off" autocapitalize="none" spellcheck="false" required>
+          </div>
+          <button class="primary" type="submit">Unlock admin tools</button>
+        </form>
+
+        <div id="admin-tools" class="stack" hidden>
+          <div class="panel stack">
+            <h2>Admin mode is on</h2>
+            <p class="hint">On this device, you can add a receipt for anyone, delete any receipt, check or uncheck any payment and change anyone's payment info.</p>
+            <button id="admin-leave" type="button">Leave admin mode</button>
+          </div>
+
+          <form id="admin-handles" class="panel stack">
+            <h2>Change someone's payment info</h2>
+            <div class="stack tight">
+              <label for="admin-handles-person">Person</label>
+              <select id="admin-handles-person" required></select>
+            </div>
+            <div class="field-row">
+              <div class="stack tight">
+                <label for="admin-venmo">Venmo username</label>
+                <input id="admin-venmo" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="31">
+              </div>
+              <div class="stack tight">
+                <label for="admin-zelle">Zelle phone or email</label>
+                <input id="admin-zelle" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="100">
+              </div>
+            </div>
+            <button class="primary" type="submit">Save payment info</button>
+          </form>
+
+          <form id="admin-reset" class="panel stack">
+            <h2>Reset a login</h2>
+            <p class="hint">Use this for a forgotten password, or if someone claimed the wrong name. That person gets signed out and can create a new password.</p>
+            <div class="stack tight">
+              <label for="admin-reset-person">Person</label>
+              <select id="admin-reset-person" required></select>
+            </div>
+            <button type="submit">Reset login</button>
+          </form>
+
+          <form id="admin-add" class="panel stack">
+            <h2>Add a person</h2>
+            <div class="stack tight">
+              <label for="admin-add-name">Full name</label>
+              <input id="admin-add-name" maxlength="60" required>
+            </div>
+            <button class="primary" type="submit">Add person</button>
+          </form>
+
+          <form id="admin-remove" class="panel stack">
+            <h2>Remove a person</h2>
+            <p class="hint">This changes everyone's share. Delete their receipts and uncheck their payments first.</p>
+            <div class="stack tight">
+              <label for="admin-remove-person">Person</label>
+              <select id="admin-remove-person" required></select>
+            </div>
+            <button type="submit">Remove person</button>
+          </form>
+
+          <form id="admin-passcode" class="panel stack">
+            <h2>Change the group passcode</h2>
+            <p class="hint">Anyone signing in or creating a login will need the new passcode. People already signed in stay signed in. Use at least 8 characters.</p>
+            <div class="stack tight">
+              <label for="admin-new-code">New group passcode</label>
+              <input id="admin-new-code" autocomplete="off" autocapitalize="none" spellcheck="false" minlength="8" required>
+            </div>
+            <button type="submit">Change passcode</button>
+          </form>
         </div>
       </section>
     </main>

@@ -22,11 +22,11 @@ function reply(status, body) {
   });
 }
 
-async function passcodeIsRight(code, apiKey) {
+async function isSignedIn(token, apiKey) {
   const response = await fetch(`${Deno.env.get('SUPABASE_URL')}/rest/v1/rpc/trip_get_state`, {
     method: 'POST',
     headers: { apikey: apiKey, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ p_code: code }),
+    body: JSON.stringify({ p_token: token }),
   });
   return response.ok;
 }
@@ -59,12 +59,12 @@ Deno.serve(async (request) => {
   } catch {
     return reply(400, { error: 'bad_request' });
   }
-  const { code, image } = input;
+  const { token, image } = input;
   if (typeof image !== 'string' || image.length > MAX_IMAGE_CHARS || !image.startsWith('data:image/jpeg;base64,')) {
     return reply(400, { error: 'bad_image' });
   }
-  if (!(await passcodeIsRight(code, request.headers.get('apikey') || ''))) {
-    return reply(403, { error: 'wrong_passcode' });
+  if (!(await isSignedIn(token, request.headers.get('apikey') || ''))) {
+    return reply(403, { error: 'signed_out' });
   }
 
   try {

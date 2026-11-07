@@ -2,16 +2,21 @@ const { computeBalances, settleUp, parseCents, formatCents } = window.TripSplit;
 const { supabaseUrl, supabaseAnonKey } = window.TRIP_TAB_CONFIG;
 
 const CODE_KEY = 'tripTab.code';
-const ME_KEY = 'tripTab.me';
+const TOKEN_KEY = 'tripTab.token';
+const ADMIN_KEY = 'tripTab.admin';
 const MAX_IMAGE_CHARS = 1900000;
 
 let code = null;
-let state = { people: [], receipts: [], payments: [] };
+let token = null;
+let adminCode = null;
+let names = [];
+let state = { me: null, people: [], receipts: [], payments: [] };
 let balances = {};
 let currentTab = 'settle';
 let confirmingId = null;
 let openPhotos = new Map();
 let readAttempt = 0;
+let pollTimer = null;
 
 const $ = (id) => document.getElementById(id);
 
@@ -44,7 +49,7 @@ async function rpc(name, params = {}) {
       apikey: supabaseAnonKey,
       Authorization: `Bearer ${supabaseAnonKey}`,
     },
-    body: JSON.stringify({ p_code: code, ...params }),
+    body: JSON.stringify(params),
   });
   const text = await response.text();
   const body = text ? JSON.parse(text) : null;
@@ -54,10 +59,7 @@ async function rpc(name, params = {}) {
 
 const nameOf = (id) => (state.people.find((p) => p.id === id) || {}).name || 'Someone';
 const personOf = (id) => state.people.find((p) => p.id === id);
-const me = () => {
-  const id = recall(ME_KEY) || $('me').value;
-  return personOf(id) ? id : '';
-};
+const canManage = (...ids) => Boolean(adminCode) || ids.includes(state.me);
 
 function showStatus(message) {
   $('status').textContent = message;
@@ -67,12 +69,28 @@ function showStatus(message) {
 
 function explain(error) {
   const messages = {
-    wrong_passcode: 'That passcode changed. Reload and enter the new one.',
     too_many_receipts: 'The receipt limit of 500 is full. Delete any duplicates first.',
     bad_venmo: 'Venmo usernames can only use letters, numbers, dashes and underscores.',
     bad_zelle: 'That Zelle phone or email is too long.',
+    not_allowed: 'Only that person or the trip admin can change this.',
+    person_has_records: 'This person still has receipts or payments. Delete those first.',
+    bad_name: 'Enter a name of 60 characters or fewer.',
+    short_passcode: 'Use at least 8 characters for the new passcode.',
+    wrong_admin: "That admin passcode isn't right.",
   };
   return messages[error.message] || "That didn't save. Check your connection and try again.";
+}
+
+// Handles an expired login anywhere in the app. Returns true if it did.
+function handleSignedOut(error) {
+  if (error.message !== 'signed_out') return false;
+  leaveApp();
+  showGate('Your login expired. Sign in again.');
+  return true;
+}
+
+function reportError(error) {
+  if (!handleSignedOut(error)) showStatus(explain(error));
 }
 
 function balanceLabel(cents) {
@@ -99,77 +117,79 @@ function copyButton(text) {
   return button;
 }
 
-async function recordPayment(transfer, button) {
-  button.disabled = true;
+async function recordPayment(transfer, box) {
+  box.disabled = true;
   try {
-    await rpc('trip_add_payment', { p_from_id: transfer.fromId, p_to_id: transfer.toId, p_amount_cents: transfer.cents });
+    await rpc('trip_add_payment', {
+      p_token: token,
+      p_from_id: transfer.fromId,
+      p_to_id: transfer.toId,
+      p_amount_cents: transfer.cents,
+      p_admin: adminCode,
+    });
     await refresh();
     showStatus(`Checked off ${formatCents(transfer.cents)} from ${nameOf(transfer.fromId)} to ${nameOf(transfer.toId)}.`);
   } catch (error) {
-    showStatus(explain(error));
-    button.disabled = false;
-    button.checked = false;
+    box.disabled = false;
+    box.checked = false;
+    reportError(error);
   }
 }
 
 async function undoPayment(payment, box) {
   box.disabled = true;
   try {
-    await rpc('trip_delete_payment', { p_id: payment.id });
+    await rpc('trip_delete_payment', { p_token: token, p_id: payment.id, p_admin: adminCode });
     await refresh();
     showStatus(`Unchecked ${formatCents(payment.amountCents)} from ${nameOf(payment.fromId)} to ${nameOf(payment.toId)}. It's back on the list.`);
   } catch (error) {
-    showStatus(explain(error));
     box.disabled = false;
     box.checked = true;
+    reportError(error);
   }
 }
 
 function transferRow(transfer) {
   const receiver = personOf(transfer.toId);
   const actions = el('div', { class: 'actions' });
-  if (receiver.venmo) {
-    actions.append(el('a', {
-      class: 'button',
-      href: venmoLink(receiver.venmo, transfer.cents, 'Trip Tab'),
-      target: '_blank',
-      rel: 'noopener noreferrer',
-      textContent: `Pay @${receiver.venmo} on Venmo`,
-    }));
+  if (transfer.fromId === state.me) {
+    if (receiver.venmo) {
+      actions.append(el('a', {
+        class: 'button',
+        href: venmoLink(receiver.venmo, transfer.cents, 'Trip Tab'),
+        target: '_blank',
+        rel: 'noopener noreferrer',
+        textContent: `Pay @${receiver.venmo} on Venmo`,
+      }));
+    }
+    if (receiver.zelle) {
+      actions.append(el('span', { class: 'handle', textContent: `Zelle: ${receiver.zelle}` }), copyButton(receiver.zelle));
+    }
+    if (!receiver.venmo && !receiver.zelle) {
+      actions.append(el('span', { class: 'hint', textContent: `${receiver.name} hasn't added payment info yet.` }));
+    }
   }
-  if (receiver.zelle) {
-    actions.append(el('span', { class: 'handle', textContent: `Zelle: ${receiver.zelle}` }), copyButton(receiver.zelle));
+  if (canManage(transfer.fromId, transfer.toId)) {
+    const paid = el('input', { type: 'checkbox' });
+    paid.addEventListener('change', () => recordPayment(transfer, paid));
+    actions.append(el('label', { class: 'check' }, paid, 'Paid'));
   }
-  if (!receiver.venmo && !receiver.zelle) {
-    actions.append(el('span', { class: 'hint', textContent: `${receiver.name} hasn't added payment info yet.` }));
-  }
-  const paid = el('input', { type: 'checkbox' });
-  paid.addEventListener('change', () => recordPayment(transfer, paid));
-  actions.append(el('label', { class: 'check' }, paid, 'Paid'));
 
   return el('div', { class: 'row' },
     el('div', { class: 'row-head' },
       el('span', { class: 'row-title', textContent: `${nameOf(transfer.fromId)} pays ${receiver.name}` }),
       el('span', { class: 'amount', textContent: formatCents(transfer.cents) })),
-    actions);
+    actions.childElementCount ? actions : null);
 }
 
 function renderSettle(transfers) {
-  const myId = me();
-  const mine = transfers.filter((t) => t.fromId === myId || t.toId === myId);
-  const myBox = $('my-transfers');
-  myBox.replaceChildren();
-  if (myId) {
-    const list = el('div', { class: 'list mine' });
-    if (mine.length) mine.forEach((t) => list.append(transferRow(t)));
-    else list.append(el('p', { class: 'empty', textContent: state.receipts.length ? "You're all square right now." : 'Nothing to settle until receipts are added.' }));
-    myBox.append(el('h2', { textContent: 'What you need to do' }), list);
-  } else {
-    myBox.append(el('p', { class: 'notice', textContent: 'Pick your name at the top to see what you owe or get back.' }));
-  }
+  const mine = transfers.filter((t) => t.fromId === state.me || t.toId === state.me);
+  const list = el('div', { class: 'list mine' });
+  if (mine.length) mine.forEach((t) => list.append(transferRow(t)));
+  else list.append(el('p', { class: 'empty', textContent: state.receipts.length ? "You're all square right now." : 'Nothing to settle until receipts are added.' }));
+  $('my-transfers').replaceChildren(el('h2', { textContent: 'What you need to do' }), list);
 
-  $('handles-form').hidden = !myId;
-  const person = personOf(myId);
+  const person = personOf(state.me);
   if (person && document.activeElement !== $('venmo') && document.activeElement !== $('zelle')) {
     $('venmo').value = person.venmo ? `@${person.venmo}` : '';
     $('zelle').value = person.zelle;
@@ -184,7 +204,7 @@ function renderSettle(transfers) {
   paidList.replaceChildren();
   if (!state.payments.length) paidList.append(el('p', { class: 'empty', textContent: 'No payments checked off yet.' }));
   for (const payment of state.payments) {
-    const box = el('input', { type: 'checkbox', checked: true });
+    const box = el('input', { type: 'checkbox', checked: true, disabled: !canManage(payment.fromId, payment.toId) });
     box.addEventListener('change', () => undoPayment(payment, box));
     paidList.append(el('div', { class: 'row' },
       el('div', { class: 'row-head' },
@@ -213,7 +233,7 @@ function confirmDelete(id, label, question, action) {
           confirmingId = null;
           await refresh();
         } catch (error) {
-          showStatus(explain(error));
+          reportError(error);
         }
       },
     }),
@@ -238,10 +258,10 @@ function renderReceipts() {
           openPhotos.delete(receipt.id);
         } else {
           try {
-            const image = await rpc('trip_get_image', { p_id: receipt.id });
+            const image = await rpc('trip_get_image', { p_token: token, p_id: receipt.id });
             if (image && image.startsWith('data:image/jpeg;base64,')) openPhotos.set(receipt.id, image);
           } catch (error) {
-            showStatus(explain(error));
+            reportError(error);
           }
         }
         render();
@@ -256,7 +276,9 @@ function renderReceipts() {
       el('span', { class: 'hint', textContent: details.join(' · ') }),
       photo ? el('img', { class: 'receipt-photo', src: photo, alt: `Receipt from ${receipt.store}` }) : null,
       el('div', { class: 'actions' }, toggle,
-        confirmDelete(receipt.id, 'Delete', 'Delete this receipt?', () => rpc('trip_delete_receipt', { p_id: receipt.id })))));
+        canManage(receipt.personId)
+          ? confirmDelete(receipt.id, 'Delete', 'Delete this receipt?', () => rpc('trip_delete_receipt', { p_token: token, p_id: receipt.id, p_admin: adminCode }))
+          : null)));
   }
 }
 
@@ -275,16 +297,20 @@ function renderPeople() {
       el('td', { class: 'num', textContent: formatCents(spent) }),
       el('td', { class: balanceClass, textContent: formatCents(balance) }),
       el('td', { textContent: String(own.length) }),
+      el('td', { textContent: person.hasLogin ? 'Yes' : 'Not yet' }),
       el('td', { class: 'handle', textContent: person.venmo ? `@${person.venmo}` : '' }),
       el('td', { class: 'handle', textContent: person.zelle })));
   }
 }
 
-function fillSelect(select, placeholder, selected) {
-  if (select.dataset.count !== String(state.people.length)) {
+function fillSelect(select, placeholder, people, selected) {
+  const signature = people.map((p) => p.id).join();
+  if (select.dataset.people !== signature) {
+    const keep = select.value;
     select.replaceChildren(el('option', { value: '', textContent: placeholder }),
-      ...state.people.map((p) => el('option', { value: p.id, textContent: p.name })));
-    select.dataset.count = String(state.people.length);
+      ...people.map((p) => el('option', { value: p.id, textContent: p.name })));
+    select.dataset.people = signature;
+    select.value = keep;
   }
   if (selected !== undefined && document.activeElement !== select) select.value = selected;
 }
@@ -293,13 +319,19 @@ function render() {
   const computed = computeBalances(state.people, state.receipts, state.payments);
   balances = computed.balances;
   const transfers = settleUp(state.people, balances);
-  const myId = me();
-  fillSelect($('me'), 'Pick your name', myId);
-  fillSelect($('receipt-person'), 'Pick a name', $('receipt-person').value || myId);
+
+  $('signed-in-as').textContent = nameOf(state.me);
+  $('receipt-person-field').hidden = !adminCode;
+  fillSelect($('receipt-person'), 'Pick a name', state.people, $('receipt-person').value || state.me);
+  fillSelect($('admin-handles-person'), 'Pick a name', state.people);
+  fillSelect($('admin-remove-person'), 'Pick a name', state.people);
+  fillSelect($('admin-reset-person'), 'Pick a name', state.people);
+  $('admin-unlock').hidden = Boolean(adminCode);
+  $('admin-tools').hidden = !adminCode;
 
   $('stat-total').textContent = formatCents(computed.totalCents);
   $('stat-share').textContent = formatCents(state.people.length ? Math.round(computed.totalCents / state.people.length) : 0);
-  $('stat-me').textContent = myId ? balanceLabel(balances[myId] || 0) : 'Pick your name';
+  $('stat-me').textContent = balanceLabel(balances[state.me] || 0);
 
   renderSettle(transfers);
   renderReceipts();
@@ -316,7 +348,7 @@ function showTab(name) {
 }
 
 async function refresh() {
-  state = await rpc('trip_get_state');
+  state = await rpc('trip_get_state', { p_token: token });
   render();
 }
 
@@ -352,40 +384,167 @@ async function photoToDataUrl(file) {
   }
 }
 
+// --- Signing in ---
+
+function gateError(id, message) {
+  $(id).textContent = message;
+  $(id).hidden = !message;
+}
+
+function chosenName() {
+  return names.find((n) => n.id === $('login-name').value);
+}
+
+function updateLoginForm() {
+  const person = chosenName();
+  const creating = Boolean(person && !person.hasLogin);
+  $('login-password-field').hidden = !person;
+  $('login-confirm-field').hidden = !creating;
+  $('login-confirm').required = creating;
+  $('login-password').required = Boolean(person);
+  $('login-password').autocomplete = creating ? 'new-password' : 'current-password';
+  $('login-password-label').textContent = creating ? 'Create a password (at least 6 characters)' : 'Password';
+  $('login-submit').textContent = creating ? 'Create login' : 'Sign in';
+  $('login-submit').hidden = !person;
+  $('login-reset-hint').hidden = !person || creating;
+  gateError('login-error', '');
+}
+
+function showCodeStep(message = '') {
+  store(CODE_KEY, null);
+  code = null;
+  $('app').hidden = true;
+  $('gate').hidden = false;
+  $('gate-form').hidden = false;
+  $('login-form').hidden = true;
+  gateError('gate-error', message);
+}
+
+async function showNameStep(message = '') {
+  try {
+    names = await rpc('trip_list_names', { p_code: code });
+  } catch (error) {
+    if (error.message === 'wrong_passcode') {
+      showCodeStep("That passcode isn't right. Check it and try again.");
+    } else {
+      $('gate').hidden = false;
+      $('gate-form').hidden = false;
+      $('login-form').hidden = true;
+      gateError('gate-error', "Couldn't connect. Check your connection and try again.");
+    }
+    return;
+  }
+  store(CODE_KEY, code);
+  $('app').hidden = true;
+  $('gate').hidden = false;
+  $('gate-form').hidden = true;
+  $('login-form').hidden = false;
+  fillSelect($('login-name'), 'Pick your name', names);
+  updateLoginForm();
+  gateError('login-error', message);
+}
+
+function showGate(message = '') {
+  if (code) showNameStep(message);
+  else showCodeStep(message);
+}
+
+function leaveApp() {
+  clearInterval(pollTimer);
+  store(TOKEN_KEY, null);
+  store(ADMIN_KEY, null);
+  token = null;
+  adminCode = null;
+  state = { me: null, people: [], receipts: [], payments: [] };
+  openPhotos = new Map();
+  $('login-form').reset();
+}
+
+async function enterApp() {
+  const savedAdmin = recall(ADMIN_KEY);
+  if (savedAdmin && await rpc('trip_admin_check', { p_token: token, p_admin: savedAdmin })) adminCode = savedAdmin;
+  else store(ADMIN_KEY, null);
+  await refresh();
+  $('gate').hidden = true;
+  $('app').hidden = false;
+  showTab(currentTab);
+  clearInterval(pollTimer);
+  pollTimer = setInterval(() => {
+    if (!document.hidden && !confirmingId) refresh().catch(handleSignedOut);
+  }, 30000);
+}
+
 $('gate-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   code = $('gate-code').value.trim();
-  $('gate-error').hidden = true;
-  await enter(true);
+  gateError('gate-error', '');
+  await showNameStep();
 });
 
-async function enter(showErrors) {
-  try {
-    await refresh();
-    store(CODE_KEY, code);
-    $('gate').hidden = true;
-    $('app').hidden = false;
-    showTab(currentTab);
-    setInterval(() => {
-      if (!document.hidden && !confirmingId) refresh().catch(() => {});
-    }, 30000);
-  } catch (error) {
-    store(CODE_KEY, null);
-    $('app').hidden = true;
-    $('gate').hidden = false;
-    if (showErrors) {
-      $('gate-error').textContent = error.message === 'wrong_passcode'
-        ? "That passcode isn't right. Check it and try again."
-        : "Couldn't connect. Check your connection and try again.";
-      $('gate-error').hidden = false;
-    }
-  }
-}
+$('login-name').addEventListener('change', updateLoginForm);
 
-$('me').addEventListener('change', () => {
-  store(ME_KEY, $('me').value || null);
-  $('receipt-person').value = $('me').value;
-  render();
+$('login-back').addEventListener('click', () => showCodeStep());
+
+$('login-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const person = chosenName();
+  if (!person) return;
+  const password = $('login-password').value;
+  gateError('login-error', '');
+  if (!person.hasLogin && password.length < 6) {
+    gateError('login-error', 'Use at least 6 characters.');
+    return;
+  }
+  if (!person.hasLogin && password.length > 72) {
+    gateError('login-error', 'Use 72 characters or fewer.');
+    return;
+  }
+  if (!person.hasLogin && password !== $('login-confirm').value) {
+    gateError('login-error', "Those passwords don't match.");
+    return;
+  }
+  const submit = $('login-submit');
+  submit.disabled = true;
+  try {
+    if (person.hasLogin) {
+      const result = await rpc('trip_sign_in', { p_code: code, p_person_id: person.id, p_password: password });
+      if (result.error) {
+        const messages = {
+          wrong_password: "That password isn't right.",
+          locked: 'Too many wrong tries. Wait 15 minutes, or ask the trip admin to reset your login.',
+          no_login: 'This login was reset. Create a new password.',
+        };
+        gateError('login-error', messages[result.error] || "Couldn't sign in. Try again.");
+        if (result.error === 'no_login') await showNameStep(messages.no_login);
+        return;
+      }
+      token = result.token;
+    } else {
+      token = await rpc('trip_create_login', { p_code: code, p_person_id: person.id, p_password: password });
+    }
+    store(TOKEN_KEY, token);
+    $('login-form').reset();
+    await enterApp();
+    showStatus(person.hasLogin ? '' : "You're set up. Add your payment info below, and tell the trip admin if this wasn't your name.");
+  } catch (error) {
+    if (error.message === 'wrong_passcode') {
+      showCodeStep('The group passcode changed. Enter the new one.');
+    } else if (error.message === 'already_claimed') {
+      await showNameStep('Someone already created a login for that name. If it should be yours, ask the trip admin to reset it.');
+    } else {
+      gateError('login-error', "Couldn't sign in. Check your connection and try again.");
+    }
+  } finally {
+    submit.disabled = false;
+  }
+});
+
+$('sign-out').addEventListener('click', async () => {
+  const old = token;
+  leaveApp();
+  showStatus('');
+  await showNameStep();
+  rpc('trip_sign_out', { p_token: old }).catch(() => {});
 });
 
 for (const button of document.querySelectorAll('.tabs button')) {
@@ -398,12 +557,18 @@ for (const button of document.querySelectorAll('.tabs button')) {
 $('handles-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   try {
-    await rpc('trip_set_handles', { p_person_id: me(), p_venmo: $('venmo').value, p_zelle: $('zelle').value });
+    await rpc('trip_set_handles', {
+      p_token: token,
+      p_person_id: state.me,
+      p_venmo: $('venmo').value,
+      p_zelle: $('zelle').value,
+      p_admin: null,
+    });
     document.activeElement.blur();
     await refresh();
     showStatus('Payment info saved.');
   } catch (error) {
-    showStatus(explain(error));
+    reportError(error);
   }
 });
 
@@ -434,7 +599,7 @@ async function fillTotalFromPhoto(image, attempt) {
     const response = await fetch(`${supabaseUrl}/functions/v1/read-receipt`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', apikey: supabaseAnonKey },
-      body: JSON.stringify({ code, image }),
+      body: JSON.stringify({ token, image }),
     });
     if (response.ok) cents = (await response.json()).totalCents;
   } catch { /* handled below: the person types the total */ }
@@ -462,18 +627,24 @@ $('receipt-form').addEventListener('submit', async (event) => {
     showStatus('Add a photo that loads before saving.');
     return;
   }
+  const person = adminCode ? $('receipt-person').value : state.me;
+  if (!person) {
+    showStatus('Pick who paid.');
+    return;
+  }
   const save = $('receipt-save');
   save.disabled = true;
   save.textContent = 'Saving...';
   try {
     await rpc('trip_add_receipt', {
-      p_person_id: $('receipt-person').value,
+      p_token: token,
+      p_person_id: person,
       p_store: $('receipt-store').value,
       p_amount_cents: cents,
       p_note: $('receipt-note').value,
       p_image: $('receipt-preview').src,
+      p_admin: adminCode,
     });
-    const person = $('receipt-person').value;
     $('receipt-form').reset();
     $('receipt-person').value = person;
     $('receipt-preview').hidden = true;
@@ -483,13 +654,114 @@ $('receipt-form').addEventListener('submit', async (event) => {
     await refresh();
     showStatus(`Saved ${formatCents(cents)}. Balances are updated.`);
   } catch (error) {
-    showStatus(explain(error));
+    reportError(error);
   } finally {
     save.disabled = false;
     save.textContent = 'Save receipt';
   }
 });
 
-code = recall(CODE_KEY);
-if (code) enter(false);
-else $('gate').hidden = false;
+// --- Admin ---
+
+// Runs an admin form's action, then reports the result at the top of the page.
+function adminForm(id, action) {
+  $(id).addEventListener('submit', async (event) => {
+    event.preventDefault();
+    try {
+      const message = await action();
+      $(id).reset();
+      await refresh();
+      showStatus(message);
+    } catch (error) {
+      reportError(error);
+    }
+  });
+}
+
+adminForm('admin-unlock', async () => {
+  const entered = $('admin-code').value.trim();
+  if (!await rpc('trip_admin_check', { p_token: token, p_admin: entered })) throw new Error('wrong_admin');
+  adminCode = entered;
+  store(ADMIN_KEY, entered);
+  return 'Admin mode is on for this device.';
+});
+
+$('admin-leave').addEventListener('click', () => {
+  adminCode = null;
+  store(ADMIN_KEY, null);
+  showStatus('Admin mode is off for this device.');
+  render();
+});
+
+$('admin-handles-person').addEventListener('change', () => {
+  const person = personOf($('admin-handles-person').value);
+  $('admin-venmo').value = person && person.venmo ? `@${person.venmo}` : '';
+  $('admin-zelle').value = person ? person.zelle : '';
+});
+
+adminForm('admin-handles', async () => {
+  const name = nameOf($('admin-handles-person').value);
+  await rpc('trip_set_handles', {
+    p_token: token,
+    p_person_id: $('admin-handles-person').value,
+    p_venmo: $('admin-venmo').value,
+    p_zelle: $('admin-zelle').value,
+    p_admin: adminCode,
+  });
+  return `Saved payment info for ${name}.`;
+});
+
+adminForm('admin-reset', async () => {
+  const id = $('admin-reset-person').value;
+  const name = nameOf(id);
+  await rpc('trip_admin_reset_login', { p_token: token, p_admin: adminCode, p_person_id: id });
+  return `Reset the login for ${name}. They can create a new password now.`;
+});
+
+adminForm('admin-add', async () => {
+  const name = $('admin-add-name').value;
+  await rpc('trip_admin_add_person', { p_token: token, p_admin: adminCode, p_name: name });
+  return `Added ${name.trim()}. Everyone's share is updated.`;
+});
+
+adminForm('admin-remove', async () => {
+  const id = $('admin-remove-person').value;
+  if (id === state.me) throw new Error('not_allowed');
+  const name = nameOf(id);
+  await rpc('trip_admin_remove_person', { p_token: token, p_admin: adminCode, p_person_id: id });
+  return `Removed ${name}. Everyone's share is updated.`;
+});
+
+adminForm('admin-passcode', async () => {
+  const next = $('admin-new-code').value.trim();
+  await rpc('trip_admin_set_passcode', { p_token: token, p_admin: adminCode, p_new_code: next });
+  code = next;
+  store(CODE_KEY, next);
+  return 'Group passcode changed. Send the new one to the group.';
+});
+
+// --- Start ---
+
+async function start() {
+  code = recall(CODE_KEY);
+  token = recall(TOKEN_KEY);
+  if (token) {
+    try {
+      await enterApp();
+      return;
+    } catch (error) {
+      if (error.message !== 'signed_out') {
+        // A dropped connection shouldn't sign anyone out.
+        $('gate').hidden = false;
+        $('gate-form').hidden = true;
+        $('login-form').hidden = true;
+        gateError('gate-error', "Couldn't connect. Check your connection and reload.");
+        return;
+      }
+      leaveApp();
+    }
+  }
+  showGate();
+}
+
+start();
