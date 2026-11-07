@@ -160,6 +160,11 @@ input:disabled { opacity: 0.6; }
 .mine { border: 2px solid var(--accent); }
 .handle { overflow-wrap: anywhere; }
 
+.person-list { border-top: 1px solid var(--line); min-width: 0; }
+.person-list:first-child { border-top: 0; }
+.person-list summary { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; padding: 12px 14px; cursor: pointer; }
+.row a { color: var(--accent); font-weight: 600; justify-self: start; }
+
 .table-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
 table { border-collapse: collapse; width: 100%; min-width: 760px; font-size: 0.92rem; }
 th, td { text-align: left; padding: 9px 12px; border-top: 1px solid var(--line); }

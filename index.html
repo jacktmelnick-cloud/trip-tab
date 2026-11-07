@@ -6,7 +6,7 @@
   <meta name="robots" content="noindex">
   <title>Trip Tab</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="style.css?v=2">
+  <link rel="stylesheet" href="style.css?v=3">
 </head>
 <body>
   <main id="gate" class="gate" hidden>
@@ -55,8 +55,9 @@
     </header>
 
     <nav class="tabs" aria-label="Sections">
-      <button type="button" data-tab="settle">Settle up</button>
+      <button type="button" data-tab="buy">To buy</button>
       <button type="button" data-tab="add">Add receipt</button>
+      <button type="button" data-tab="settle">Settle up</button>
       <button type="button" data-tab="receipts">Receipts</button>
       <button type="button" data-tab="people">Everyone</button>
       <button type="button" data-tab="admin">Admin</button>
@@ -65,7 +66,13 @@
     <main class="content">
       <p id="status" class="notice" role="status" hidden></p>
 
-      <section id="tab-settle" class="tab stack">
+      <section id="tab-buy" class="tab stack">
+        <div id="my-list" class="stack"></div>
+        <h2>Everyone's lists</h2>
+        <div id="everyone-lists" class="list"></div>
+      </section>
+
+      <section id="tab-settle" class="tab stack" hidden>
         <div id="my-transfers" class="stack"></div>
         <form id="handles-form" class="panel stack">
           <h2>Your payment info</h2>
@@ -217,8 +224,8 @@
   </div>
 
   <!-- Bump ?v= on every release so browsers never mix a new page with old cached code. -->
-  <script src="config.js?v=2"></script>
-  <script src="split.js?v=2"></script>
-  <script src="app.js?v=2"></script>
+  <script src="config.js?v=3"></script>
+  <script src="split.js?v=3"></script>
+  <script src="app.js?v=3"></script>
 </body>
 </html>

@@ -12,7 +12,8 @@ let adminCode = null;
 let names = [];
 let state = { me: null, people: [], receipts: [], payments: [] };
 let balances = {};
-let currentTab = 'settle';
+let assignments = null;
+let currentTab = 'buy';
 let confirmingId = null;
 let openPhotos = new Map();
 let readAttempt = 0;
@@ -180,6 +181,57 @@ function transferRow(transfer) {
       el('span', { class: 'row-title', textContent: `${nameOf(transfer.fromId)} pays ${receiver.name}` }),
       el('span', { class: 'amount', textContent: formatCents(transfer.cents) })),
     actions.childElementCount ? actions : null);
+}
+
+function buyRow(item) {
+  const safeUrl = item.url.startsWith('https://') ? item.url : '';
+  return el('div', { class: 'row' },
+    el('div', { class: 'row-head' },
+      el('span', { class: 'row-title', textContent: `${item.item} (${item.quantity})` }),
+      el('span', { class: 'amount', textContent: `about ${formatCents(item.estimateCents)}` })),
+    el('span', { class: 'hint', textContent: `${item.when} · ${item.store}` }),
+    safeUrl ? el('a', { href: safeUrl, target: '_blank', rel: 'noopener noreferrer', textContent: `Open ${item.store}` }) : null);
+}
+
+const estimateOf = (items) => items.reduce((sum, a) => sum + a.estimateCents, 0);
+
+// Runs after the list loads, not on every refresh, so open sections stay open.
+function renderBuy() {
+  const mineBox = $('my-list');
+  const everyone = $('everyone-lists');
+  if (!assignments) {
+    mineBox.replaceChildren(el('p', { class: 'notice', textContent: "Shopping lists aren't available yet. Check back soon." }));
+    everyone.replaceChildren();
+    return;
+  }
+  const mine = assignments.filter((a) => a.personId === state.me);
+  const myList = el('div', { class: 'list mine' });
+  if (mine.length) mine.forEach((a) => myList.append(buyRow(a)));
+  else myList.append(el('p', { class: 'empty', textContent: "You don't have anything to buy." }));
+  mineBox.replaceChildren(
+    el('h2', { textContent: `Your list: about ${formatCents(estimateOf(mine))}` }),
+    el('p', { class: 'hint', textContent: 'Prices are estimates. Your real receipt is what counts toward the split.' }),
+    myList);
+
+  const groups = state.people.map((p) => ({ name: p.name, items: assignments.filter((a) => a.personId === p.id) }));
+  const known = new Set(state.people.map((p) => p.id));
+  const unassigned = assignments.filter((a) => !known.has(a.personId));
+  if (unassigned.length) groups.push({ name: 'Unassigned', items: unassigned });
+  everyone.replaceChildren(...groups.filter((g) => g.items.length).map((g) => el('details', { class: 'person-list' },
+    el('summary', {},
+      el('span', { class: 'row-title', textContent: g.name }),
+      el('span', { class: 'amount', textContent: `about ${formatCents(estimateOf(g.items))}` })),
+    ...g.items.map(buyRow))));
+}
+
+async function loadAssignments() {
+  try {
+    assignments = await rpc('trip_get_assignments', { p_token: token });
+  } catch (error) {
+    if (handleSignedOut(error)) return;
+    assignments = null;
+  }
+  renderBuy();
 }
 
 function renderSettle(transfers) {
@@ -456,6 +508,9 @@ function leaveApp() {
   token = null;
   adminCode = null;
   state = { me: null, people: [], receipts: [], payments: [] };
+  assignments = null;
+  $('my-list').replaceChildren();
+  $('everyone-lists').replaceChildren();
   openPhotos = new Map();
   $('login-form').reset();
 }
@@ -468,6 +523,7 @@ async function enterApp() {
   $('gate').hidden = true;
   $('app').hidden = false;
   showTab(currentTab);
+  loadAssignments();
   clearInterval(pollTimer);
   pollTimer = setInterval(() => {
     if (!document.hidden && !confirmingId) refresh().catch(handleSignedOut);
@@ -525,7 +581,7 @@ $('login-form').addEventListener('submit', async (event) => {
     store(TOKEN_KEY, token);
     $('login-form').reset();
     await enterApp();
-    showStatus(person.hasLogin ? '' : "You're set up. Add your payment info below, and tell the trip admin if this wasn't your name.");
+    showStatus(person.hasLogin ? '' : "You're set up. Here's your shopping list. Add your payment info under Settle up, and tell the trip admin if this wasn't your name.");
   } catch (error) {
     if (error.message === 'wrong_passcode') {
       showCodeStep('The group passcode changed. Enter the new one.');
