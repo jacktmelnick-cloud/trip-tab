@@ -384,7 +384,7 @@ function render() {
   $('admin-tools').hidden = !adminCode;
 
   $('stat-total').textContent = formatCents(computed.totalCents);
-  $('stat-share').textContent = formatCents(state.people.length ? Math.round(computed.totalCents / state.people.length) : 0);
+  $('stat-share').textContent = formatCents(computed.shares[state.me] || 0);
   $('stat-me').textContent = balanceLabel(balances[state.me] || 0);
 
   renderSettle(transfers);
@@ -511,6 +511,7 @@ function leaveApp() {
   adminCode = null;
   state = { me: null, people: [], receipts: [], payments: [] };
   assignments = null;
+  currentTab = 'buy';
   $('my-list').replaceChildren();
   $('everyone-lists').replaceChildren();
   openPhotos = new Map();

@@ -1,22 +1,46 @@
 // Money math for Trip Tab. Everything is whole cents so totals always add up.
 (function (root) {
-  // Returns {totalCents, balances: {personId: cents}}. Positive means they're owed money.
+  // Splits the total evenly, except anyone with a cap pays no more than it.
+  // What a capped person doesn't pay is shared evenly by everyone else.
+  function computeShares(people, totalCents) {
+    const shares = {};
+    let open = people;
+    let remaining = totalCents;
+    for (;;) {
+      const even = remaining / open.length;
+      const capped = open.filter((p) => Number.isInteger(p.shareCapCents) && p.shareCapCents < even);
+      if (!capped.length) break;
+      for (const p of capped) {
+        shares[p.id] = p.shareCapCents;
+        remaining -= p.shareCapCents;
+      }
+      open = open.filter((p) => !capped.includes(p));
+      if (!open.length) break;
+    }
+    // If every single person is capped below the total, the rest still has to land somewhere.
+    if (!open.length) open = people;
+    const base = Math.floor(remaining / open.length);
+    const leftover = remaining - base * open.length;
+    open.forEach((p, i) => {
+      shares[p.id] = (shares[p.id] || 0) + base + (i < leftover ? 1 : 0);
+    });
+    return shares;
+  }
+
+  // Returns {totalCents, shares, balances: {personId: cents}}. A positive balance means they're owed money.
   function computeBalances(people, receipts, payments) {
     const totalCents = receipts.reduce((sum, r) => sum + r.amountCents, 0);
     const balances = {};
-    if (!people.length) return { totalCents, balances };
+    if (!people.length) return { totalCents, shares: {}, balances };
 
-    const base = Math.floor(totalCents / people.length);
-    const leftover = totalCents - base * people.length;
-    people.forEach((p, i) => {
-      balances[p.id] = -(base + (i < leftover ? 1 : 0));
-    });
+    const shares = computeShares(people, totalCents);
+    for (const p of people) balances[p.id] = -shares[p.id];
     for (const r of receipts) balances[r.personId] += r.amountCents;
     for (const y of payments) {
       balances[y.fromId] += y.amountCents;
       balances[y.toId] -= y.amountCents;
     }
-    return { totalCents, balances };
+    return { totalCents, shares, balances };
   }
 
   // Matches the biggest debtor with the biggest creditor until everyone is square.
